@@ -78,7 +78,9 @@ function App() {
     cameraShape,
     setCameraShape,
     isBgRemovalEnabled,
-    setIsBgRemovalEnabled
+    setIsBgRemovalEnabled,
+    customBgImage,
+    setCustomBgImage
   } = useMediaRecorder();
 
   const containerRef = useRef<HTMLDivElement>(null);
@@ -451,6 +453,30 @@ function App() {
                 <span className="flex-center gap-2" title="Uses local AI to remove your background">Remove BG</span>
                 <input type="checkbox" checked={isBgRemovalEnabled} onChange={e => setIsBgRemovalEnabled(e.target.checked)} />
               </label>
+
+              {isBgRemovalEnabled && (
+                <div style={{ marginTop: '0.5rem', background: 'var(--bg-main)', padding: '0.5rem', border: '2px solid #000' }}>
+                  <label style={{ fontSize: '0.8rem', fontWeight: 600, display: 'block', marginBottom: '0.25rem' }}>Virtual Background Image</label>
+                  <input 
+                    type="file" 
+                    accept="image/*" 
+                    onChange={e => {
+                      const file = e.target.files?.[0];
+                      if (file) {
+                        setCustomBgImage(URL.createObjectURL(file));
+                      } else {
+                        setCustomBgImage(null);
+                      }
+                    }} 
+                    style={{ fontSize: '0.8rem', width: '100%' }}
+                  />
+                  {customBgImage && (
+                    <button className="btn btn-sm mt-2" onClick={() => setCustomBgImage(null)} style={{ padding: '0.2rem 0.5rem', fontSize: '0.75rem', width: '100%' }}>
+                      Clear Background
+                    </button>
+                  )}
+                </div>
+              )}
             </div>
             
             <div className="flex-col gap-2">

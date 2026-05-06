@@ -17,6 +17,7 @@ export const useMediaRecorder = () => {
 
   const [cameraShape, setCameraShape] = useState<'rectangle' | 'circle' | 'none'>('rectangle');
   const [isBgRemovalEnabled, setIsBgRemovalEnabled] = useState(false);
+  const [customBgImage, setCustomBgImage] = useState<string | null>(null);
 
   const screenVideoRef = useRef<HTMLVideoElement | null>(null);
   const cameraVideoRef = useRef<HTMLVideoElement | null>(null); // For UI
@@ -25,6 +26,7 @@ export const useMediaRecorder = () => {
   const compositeCanvasRef = useRef<HTMLCanvasElement | null>(null);
   const selfieSegmentationRef = useRef<any>(null);
   const isSegmentingRef = useRef(false);
+  const customBgImageRef = useRef<HTMLImageElement | null>(null);
 
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const chunksRef = useRef<BlobPart[]>([]);
@@ -169,6 +171,20 @@ export const useMediaRecorder = () => {
     startCamera();
   }, [selectedVideoId, selectedAudioId, isCameraEnabled, isAudioEnabled]);
 
+  // Load Custom BG Image
+  useEffect(() => {
+    if (customBgImage) {
+      const img = new Image();
+      img.crossOrigin = "anonymous";
+      img.src = customBgImage;
+      img.onload = () => {
+        customBgImageRef.current = img;
+      };
+    } else {
+      customBgImageRef.current = null;
+    }
+  }, [customBgImage]);
+
   // Load MediaPipe
   useEffect(() => {
     if (isBgRemovalEnabled && !selfieSegmentationRef.current) {
@@ -198,6 +214,12 @@ export const useMediaRecorder = () => {
           // Only overwrite existing pixels with the raw camera frame
           ctx.globalCompositeOperation = 'source-in';
           ctx.drawImage(results.image, 0, 0, processedCameraCanvasRef.current.width, processedCameraCanvasRef.current.height);
+          
+          // Inject custom background behind the masked image
+          if (customBgImageRef.current) {
+            ctx.globalCompositeOperation = 'destination-over';
+            ctx.drawImage(customBgImageRef.current, 0, 0, processedCameraCanvasRef.current.width, processedCameraCanvasRef.current.height);
+          }
           
           ctx.restore();
           isSegmentingRef.current = false;
@@ -600,6 +622,8 @@ export const useMediaRecorder = () => {
     cameraShape,
     setCameraShape,
     isBgRemovalEnabled,
-    setIsBgRemovalEnabled
+    setIsBgRemovalEnabled,
+    customBgImage,
+    setCustomBgImage
   };
 };
