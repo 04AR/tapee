@@ -39,5 +39,3 @@
    ```bash
    npm run build
    ```
-
----
