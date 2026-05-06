@@ -321,8 +321,41 @@ label {
 
 .camera-draggable:active {
   cursor: grabbing;
+}
+
+.transform-handle {
+  position: absolute;
+  width: 24px;
+  height: 24px;
+  background: var(--accent-yellow);
+  border: 2px solid #000;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 16px;
+  font-weight: bold;
+  z-index: 20;
+  cursor: pointer;
   box-shadow: 2px 2px 0 #000;
-  transform: translate(4px, 4px);
+  border-radius: 50%;
+  pointer-events: auto;
+}
+
+.transform-handle:hover {
+  background: #fff;
+}
+
+.rotate-handle {
+  top: -12px;
+  left: 50%;
+  transform: translateX(-50%);
+  cursor: ew-resize;
+}
+
+.resize-handle {
+  bottom: -12px;
+  right: -12px;
+  cursor: nwse-resize;
 }
 
 .camera-video {

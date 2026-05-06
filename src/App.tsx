@@ -71,19 +71,32 @@ function App() {
     screenVideoRef,
     cameraVideoRef,
     attachCameraStream,
-    updateCameraPosition,
+    updateCameraTransform,
     recordings,
     error,
-    setError
+    setError,
+    cameraShape,
+    setCameraShape,
+    isBgRemovalEnabled,
+    setIsBgRemovalEnabled
   } = useMediaRecorder();
 
   const containerRef = useRef<HTMLDivElement>(null);
   const draggableRef = useRef<HTMLDivElement>(null);
   
-  const [isDragging, setIsDragging] = useState(false);
-  const [dragOffset, setDragOffset] = useState({ x: 0, y: 0 });
   const [isDocumentPipOpen, setIsDocumentPipOpen] = useState(false);
   const [deferredPrompt, setDeferredPrompt] = useState<any>(null);
+
+  type InteractionMode = 'idle' | 'drag' | 'resize' | 'rotate';
+  const [interactionMode, setInteractionMode] = useState<InteractionMode>('idle');
+  const transformRef = useRef({ x: 0.05, y: 0.05, scale: 0.2, rotation: 0 });
+  const interactionStartRef = useRef({ mouseX: 0, mouseY: 0, startX: 0, startY: 0, startScale: 0, startRotation: 0, startW: 0, startH: 0, cw: 0, ch: 0 });
+
+  useEffect(() => {
+    // Initial sync
+    updateCameraTransform(transformRef.current.x, transformRef.current.y, transformRef.current.scale, transformRef.current.rotation);
+  }, [updateCameraTransform]);
+
 
   // Handle PWA Install Prompt
   useEffect(() => {
@@ -104,67 +117,105 @@ function App() {
     }
   };
 
-  // Handle Dragging
-  const handleMouseDown = (e: React.MouseEvent | React.TouchEvent) => {
-    if (!draggableRef.current) return;
-    setIsDragging(true);
+  const handlePointerDown = (e: React.MouseEvent | React.TouchEvent, mode: InteractionMode) => {
+    if (!draggableRef.current || !containerRef.current) return;
+    if (mode !== 'drag') e.stopPropagation();
     
-    const clientX = 'touches' in e ? e.touches[0].clientX : e.clientX;
-    const clientY = 'touches' in e ? e.touches[0].clientY : e.clientY;
+    setInteractionMode(mode);
+    const clientX = 'touches' in e ? e.touches[0].clientX : (e as React.MouseEvent).clientX;
+    const clientY = 'touches' in e ? e.touches[0].clientY : (e as React.MouseEvent).clientY;
     
-    const rect = draggableRef.current.getBoundingClientRect();
-    setDragOffset({
-      x: clientX - rect.left,
-      y: clientY - rect.top
-    });
+    const containerRect = containerRef.current.getBoundingClientRect();
+    
+    interactionStartRef.current = {
+      mouseX: clientX,
+      mouseY: clientY,
+      startX: transformRef.current.x,
+      startY: transformRef.current.y,
+      startScale: transformRef.current.scale,
+      startRotation: transformRef.current.rotation,
+      startW: containerRect.width * transformRef.current.scale,
+      startH: (containerRect.width * transformRef.current.scale) / (cameraShape === 'circle' ? 1 : (16/9)),
+      cw: containerRect.width,
+      ch: containerRect.height
+    };
   };
 
-  const handleMouseMove = (e: MouseEvent | TouchEvent) => {
-    if (!isDragging || !containerRef.current || !draggableRef.current) return;
+  const handlePointerMove = (e: MouseEvent | TouchEvent) => {
+    if (interactionMode === 'idle' || !containerRef.current || !draggableRef.current) return;
     
     const clientX = 'touches' in e ? e.touches[0].clientX : (e as MouseEvent).clientX;
     const clientY = 'touches' in e ? e.touches[0].clientY : (e as MouseEvent).clientY;
     
-    const containerRect = containerRef.current.getBoundingClientRect();
-    const draggableRect = draggableRef.current.getBoundingClientRect();
+    const start = interactionStartRef.current;
+    const dx = clientX - start.mouseX;
+    const dy = clientY - start.mouseY;
     
-    let newX = clientX - containerRect.left - dragOffset.x;
-    let newY = clientY - containerRect.top - dragOffset.y;
+    let newX = start.startX;
+    let newY = start.startY;
+    let newScale = start.startScale;
+    let newRotation = start.startRotation;
     
-    // Constrain to container
-    newX = Math.max(0, Math.min(newX, containerRect.width - draggableRect.width));
-    newY = Math.max(0, Math.min(newY, containerRect.height - draggableRect.height));
+    if (interactionMode === 'drag') {
+      newX = start.startX + (dx / start.cw);
+      newY = start.startY + (dy / start.ch);
+      
+      // Bounding constraints
+      const maxNormX = 1 - newScale;
+      const aspect = cameraShape === 'circle' ? 1 : (16/9);
+      const hScale = (newScale * start.cw) / aspect / start.ch;
+      const maxNormY = 1 - hScale;
+      
+      newX = Math.max(0, Math.min(newX, maxNormX));
+      newY = Math.max(0, Math.min(newY, maxNormY));
+      
+    } else if (interactionMode === 'resize') {
+      const newWidth = start.startW + dx;
+      newScale = Math.max(0.1, Math.min(1.0, newWidth / start.cw)); // min 10%, max 100% width
+      
+      // Bounding constraints: don't scale beyond screen edges
+      const maxScaleX = 1 - newX;
+      const aspect = cameraShape === 'circle' ? 1 : (16/9);
+      const maxScaleY = (1 - newY) * start.ch * aspect / start.cw;
+      newScale = Math.min(newScale, maxScaleX, maxScaleY);
+      
+    } else if (interactionMode === 'rotate') {
+      newRotation = start.startRotation + (dx / 2);
+    }
     
-    draggableRef.current.style.left = `${newX}px`;
-    draggableRef.current.style.top = `${newY}px`;
+    transformRef.current = { x: newX, y: newY, scale: newScale, rotation: newRotation };
+    updateCameraTransform(newX, newY, newScale, newRotation);
     
-    // Update normalized position for the canvas compositing
-    updateCameraPosition(newX / containerRect.width, newY / containerRect.height);
+    const el = draggableRef.current;
+    el.style.left = `${newX * 100}%`;
+    el.style.top = `${newY * 100}%`;
+    el.style.width = `${newScale * 100}%`;
+    el.style.transform = `rotate(${newRotation}deg)`;
   };
 
-  const handleMouseUp = () => {
-    setIsDragging(false);
+  const handlePointerUp = () => {
+    setInteractionMode('idle');
   };
 
   useEffect(() => {
-    if (isDragging) {
-      window.addEventListener('mousemove', handleMouseMove);
-      window.addEventListener('mouseup', handleMouseUp);
-      window.addEventListener('touchmove', handleMouseMove, { passive: false });
-      window.addEventListener('touchend', handleMouseUp);
+    if (interactionMode !== 'idle') {
+      window.addEventListener('mousemove', handlePointerMove);
+      window.addEventListener('mouseup', handlePointerUp);
+      window.addEventListener('touchmove', handlePointerMove, { passive: false });
+      window.addEventListener('touchend', handlePointerUp);
     } else {
-      window.removeEventListener('mousemove', handleMouseMove);
-      window.removeEventListener('mouseup', handleMouseUp);
-      window.removeEventListener('touchmove', handleMouseMove);
-      window.removeEventListener('touchend', handleMouseUp);
+      window.removeEventListener('mousemove', handlePointerMove);
+      window.removeEventListener('mouseup', handlePointerUp);
+      window.removeEventListener('touchmove', handlePointerMove);
+      window.removeEventListener('touchend', handlePointerUp);
     }
     return () => {
-      window.removeEventListener('mousemove', handleMouseMove);
-      window.removeEventListener('mouseup', handleMouseUp);
-      window.removeEventListener('touchmove', handleMouseMove);
-      window.removeEventListener('touchend', handleMouseUp);
+      window.removeEventListener('mousemove', handlePointerMove);
+      window.removeEventListener('mouseup', handlePointerUp);
+      window.removeEventListener('touchmove', handlePointerMove);
+      window.removeEventListener('touchend', handlePointerUp);
     };
-  }, [isDragging]);
+  }, [interactionMode]);
 
   const requestPiP = async () => {
     if ('documentPictureInPicture' in window) {
@@ -189,7 +240,34 @@ function App() {
           <div style={{ padding: '1rem', height: '100vh', display: 'flex', flexDirection: 'column', gap: '1rem', background: 'var(--bg-main)' }}>
             <h3 style={{ fontSize: '1rem', borderBottom: '4px solid #000', paddingBottom: '0.5rem', textAlign: 'center' }}>Tapee Controls</h3>
 
-            <div className="flex-col gap-2">
+            {isCameraEnabled && (
+              <div style={{
+                flex: 1, 
+                border: cameraShape === 'none' ? 'none' : '4px solid #000', 
+                overflow: 'hidden', 
+                background: cameraShape === 'none' ? 'transparent' : 'var(--accent-cyan)', 
+                position: 'relative',
+                borderRadius: cameraShape === 'circle' ? '50%' : '0',
+                aspectRatio: cameraShape === 'circle' ? '1 / 1' : 'auto',
+                margin: cameraShape === 'circle' ? '0 auto' : '0',
+                maxHeight: cameraShape === 'circle' ? '100%' : 'auto',
+                boxShadow: cameraShape === 'none' ? 'none' : '4px 4px 0 #000',
+              }}>
+                <video 
+                  autoPlay 
+                  playsInline 
+                  muted 
+                  ref={(el) => { if (el) { el.srcObject = cameraVideoRef.current?.srcObject || null; } }}
+                  style={{ 
+                    width: '100%', height: '100%', objectFit: 'cover', 
+                    transform: 'scaleX(-1)',
+                    borderRadius: cameraShape === 'circle' ? '50%' : '0'
+                  }} 
+                />
+              </div>
+            )}
+
+            <div className="flex-col gap-2 mt-auto">
                 {!isRecording ? (
                   <button className="btn btn-primary" onClick={startRecording} style={{ width: '100%' }}>
                     <Video size={16} /> Start Recording
@@ -249,17 +327,50 @@ function App() {
               <div 
                 className="camera-draggable" 
                 ref={draggableRef}
-                onMouseDown={handleMouseDown}
-                onTouchStart={handleMouseDown}
-                style={{ left: '5%', top: '5%' }}
+                onMouseDown={(e) => handlePointerDown(e, 'drag')}
+                onTouchStart={(e) => handlePointerDown(e, 'drag')}
+                style={{ 
+                   left: `${transformRef.current.x * 100}%`, 
+                   top: `${transformRef.current.y * 100}%`,
+                   width: `${transformRef.current.scale * 100}%`,
+                   transform: `rotate(${transformRef.current.rotation}deg)`,
+                   borderRadius: cameraShape === 'circle' ? '50%' : '0',
+                   aspectRatio: cameraShape === 'circle' ? '1 / 1' : '16 / 9',
+                   background: cameraShape === 'none' ? 'transparent' : 'var(--accent-cyan)',
+                   border: cameraShape === 'none' ? 'none' : '4px solid #000',
+                   boxShadow: cameraShape === 'none' ? 'none' : '4px 4px 0 #000',
+                   padding: cameraShape === 'none' ? '0' : '4px',
+                   touchAction: 'none'
+                }}
               >
+                <div 
+                   className="transform-handle rotate-handle" 
+                   onMouseDown={(e) => handlePointerDown(e, 'rotate')}
+                   onTouchStart={(e) => handlePointerDown(e, 'rotate')}
+                >
+                   ⟳
+                </div>
+                
                 <video 
                   ref={attachCameraStream} 
                   className="camera-video" 
                   autoPlay 
                   playsInline 
                   muted 
+                  style={{ 
+                     borderRadius: cameraShape === 'circle' ? '50%' : '0',
+                     border: cameraShape === 'none' ? 'none' : '2px solid #000',
+                     pointerEvents: 'none'
+                  }}
                 />
+
+                <div 
+                   className="transform-handle resize-handle" 
+                   onMouseDown={(e) => handlePointerDown(e, 'resize')}
+                   onTouchStart={(e) => handlePointerDown(e, 'resize')}
+                >
+                   ⤡
+                </div>
               </div>
             )}
             
@@ -321,6 +432,24 @@ function App() {
                     }
                   }} 
                 />
+              </label>
+            </div>
+            
+            <div className="flex-col gap-2">
+              <label className="flex-between gap-2" style={{ justifyContent: 'space-between' }}>
+                <span className="flex-center gap-2">Shape</span>
+              </label>
+              <select value={cameraShape} onChange={e => setCameraShape(e.target.value as any)} disabled={isRecording}>
+                 <option value="rectangle">Rectangle</option>
+                 <option value="circle">Circle</option>
+                 <option value="none">None (Transparent)</option>
+              </select>
+            </div>
+
+            <div className="flex-col gap-2">
+              <label className="flex-between gap-2" style={{ justifyContent: 'space-between', cursor: 'pointer' }}>
+                <span className="flex-center gap-2" title="Uses local AI to remove your background">Remove BG</span>
+                <input type="checkbox" checked={isBgRemovalEnabled} onChange={e => setIsBgRemovalEnabled(e.target.checked)} />
               </label>
             </div>
             
