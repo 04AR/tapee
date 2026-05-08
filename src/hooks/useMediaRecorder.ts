@@ -1,4 +1,6 @@
 import { useState, useRef, useEffect, useCallback } from 'react';
+import { Capacitor } from '@capacitor/core';
+import { ScreenRecorder } from '@srikant-kumar/capacitor-screen-recorder';
 
 interface DeviceList {
   audio: MediaDeviceInfo[];
@@ -59,10 +61,28 @@ export const useMediaRecorder = () => {
         });
       } catch (err) {
         console.error("Error fetching devices", err);
-        setError("Could not access camera/microphone. Please check permissions.");
+        if (!Capacitor.isNativePlatform()) {
+          setError("Could not access camera/microphone. Please check permissions.");
+        }
       }
     };
     getDevices();
+
+    // Register Native Screen Recorder Listener
+    if (Capacitor.isNativePlatform()) {
+      // @ts-ignore
+      ScreenRecorder.addListener('onRecordingComplete', (data: any) => {
+        alert("Video saved to: " + data.file_path);
+        setIsRecording(false);
+        setIsPaused(false);
+      });
+      // @ts-ignore
+      ScreenRecorder.addListener('onRecordingError', (data: any) => {
+        setError("Recording Error: " + data.message);
+        setIsRecording(false);
+        setIsPaused(false);
+      });
+    }
     
     // Setup hidden raw camera video
     rawCameraVideoRef.current.autoplay = true;
@@ -463,6 +483,18 @@ export const useMediaRecorder = () => {
   }, [isCameraEnabled, cameraShape]);
 
   const startRecording = async () => {
+    if (Capacitor.isNativePlatform()) {
+      try {
+        await ScreenRecorder.start({});
+        setIsRecording(true);
+        return;
+      } catch (err: any) {
+        console.error(err);
+        setError("Failed to start native screen recorder");
+        return;
+      }
+    }
+
     const streams = await getStreams();
     if (!streams) return;
 
@@ -570,7 +602,19 @@ export const useMediaRecorder = () => {
     }
   };
 
-  const stopRecording = () => {
+  const stopRecording = async () => {
+    if (Capacitor.isNativePlatform()) {
+      try {
+        await ScreenRecorder.stop({});
+        setIsRecording(false);
+        return;
+      } catch (err: any) {
+        console.error(err);
+        setError("Failed to stop native screen recorder");
+        return;
+      }
+    }
+
     if (mediaRecorderRef.current && mediaRecorderRef.current.state !== 'inactive') {
       mediaRecorderRef.current.stop();
     }
